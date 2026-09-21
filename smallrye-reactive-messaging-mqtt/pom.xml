@@ -23,6 +23,11 @@
       <artifactId>smallrye-mutiny-vertx-mqtt</artifactId>
       <version>${smallrye-vertx-mutiny-clients.version}</version>
     </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-codegen</artifactId>
+      <scope>provided</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.testcontainers</groupId>
