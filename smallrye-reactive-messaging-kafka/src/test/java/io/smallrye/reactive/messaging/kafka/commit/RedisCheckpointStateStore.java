@@ -107,11 +107,16 @@ public class RedisCheckpointStateStore implements CheckpointStateStore {
 
     @Override
     public Uni<Map<TopicPartition, ProcessingState<?>>> fetchProcessingState(Collection<TopicPartition> partitions) {
+        return runWithRedis(redis -> fetchProcessingState(redis::send, partitions));
+    }
+
+    private Uni<Map<TopicPartition, ProcessingState<?>>> fetchProcessingState(Function<Request, Uni<Response>> sender,
+            Collection<TopicPartition> partitions) {
         List<Tuple2<TopicPartition, String>> tps = partitions.stream()
                 .map(tp -> Tuple2.of(tp, this.getKey(tp)))
                 .collect(Collectors.toList());
         Object[] args = tps.stream().map(Tuple2::getItem2).toArray();
-        return runWithRedis(redis -> redis.send(cmd(Command.MGET, args))
+        return sender.apply(cmd(Command.MGET, args))
                 .onFailure().invoke(t -> log.errorf(t, "Error fetching processing state %s", partitions))
                 .onItem().invoke(r -> log.tracef("Fetched state for partitions %s : %s", partitions, r))
                 .map(response -> {
@@ -126,7 +131,7 @@ public class RedisCheckpointStateStore implements CheckpointStateStore {
                                 .ifPresent(s -> stateMap.put(t.getItem1(), s));
                     }
                     return stateMap;
-                }));
+                });
     }
 
     private String getKey(TopicPartition partition) {
@@ -146,36 +151,44 @@ public class RedisCheckpointStateStore implements CheckpointStateStore {
                 .map(tp -> Tuple2.of(tp, this.getKey(tp)))
                 .collect(Collectors.toList());
         Object[] args = tps.stream().map(Tuple2::getItem2).toArray();
-        return runWithRedis(redis -> redis.send(cmd(Command.WATCH, args)))
-                .chain(() -> fetchProcessingState(states.keySet()))
-                .chain(current -> {
-                    Map<String, String> map = states.entrySet().stream()
-                            .filter(toPersist -> {
-                                TopicPartition key = toPersist.getKey();
-                                ProcessingState<?> newState = toPersist.getValue();
-                                ProcessingState<?> currentState = current.get(key);
-                                return ProcessingState.isEmptyOrNull(currentState) ||
-                                        (!ProcessingState.isEmptyOrNull(newState)
-                                                && newState.getOffset() >= currentState.getOffset());
-                            }).collect(Collectors.toMap(e -> getKey(e.getKey()), e -> serializeState(e.getValue()).toString()));
-                    if (map.isEmpty()) {
-                        return Uni.createFrom().voidItem();
-                    } else {
-                        List<Request> cmds = new ArrayList<>();
-                        cmds.add(cmd(Command.MULTI));
-                        Request mset = cmd(Command.MSET);
-                        map.forEach((t, s) -> mset.arg(t).arg(s));
-                        cmds.add(mset);
-                        cmds.add(cmd(Command.EXEC));
-                        return redis.batch(cmds).chain(responses -> {
-                            if (responses.contains(null)) {
-                                return Uni.createFrom().failure(new AbortedException("Redis batch aborted"));
+        // WATCH, MULTI and EXEC only make sense on a single connection, and the pooled client rejects them
+        // with "Transactional command in connection-less mode not allowed", so run the whole transaction,
+        // including the read the optimistic lock guards, on a dedicated connection.
+        return runWithRedis(Redis::connect)
+                .chain(connection -> connection.send(cmd(Command.WATCH, args))
+                        .chain(() -> fetchProcessingState(connection::send, states.keySet()))
+                        .chain(current -> {
+                            Map<String, String> map = states.entrySet().stream()
+                                    .filter(toPersist -> {
+                                        TopicPartition key = toPersist.getKey();
+                                        ProcessingState<?> newState = toPersist.getValue();
+                                        ProcessingState<?> currentState = current.get(key);
+                                        return ProcessingState.isEmptyOrNull(currentState) ||
+                                                (!ProcessingState.isEmptyOrNull(newState)
+                                                        && newState.getOffset() >= currentState.getOffset());
+                                    }).collect(
+                                            Collectors.toMap(e -> getKey(e.getKey()),
+                                                    e -> serializeState(e.getValue()).toString()));
+                            if (map.isEmpty()) {
+                                // release the keys watched above, the connection goes back to the pool
+                                return connection.send(cmd(Command.UNWATCH)).replaceWithVoid();
                             } else {
-                                return Uni.createFrom().voidItem();
+                                List<Request> cmds = new ArrayList<>();
+                                cmds.add(cmd(Command.MULTI));
+                                Request mset = cmd(Command.MSET);
+                                map.forEach((t, s) -> mset.arg(t).arg(s));
+                                cmds.add(mset);
+                                cmds.add(cmd(Command.EXEC));
+                                return connection.batch(cmds).chain(responses -> {
+                                    if (responses.contains(null)) {
+                                        return Uni.createFrom().failure(new AbortedException("Redis batch aborted"));
+                                    } else {
+                                        return Uni.createFrom().voidItem();
+                                    }
+                                }).onItem().invoke(r -> log.debugf("Persisted state for partition %s -> %s", map, r));
                             }
-                        }).onItem().invoke(r -> log.debugf("Persisted state for partition %s -> %s", map, r));
-                    }
-                });
+                        })
+                        .eventually(connection::close));
     }
 
     private Buffer serializeState(ProcessingState<?> state) {
