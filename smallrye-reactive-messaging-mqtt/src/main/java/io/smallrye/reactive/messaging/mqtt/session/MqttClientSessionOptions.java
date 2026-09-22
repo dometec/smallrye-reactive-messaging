@@ -497,7 +497,7 @@ public class MqttClientSessionOptions extends MqttClientOptions {
     }
 
     @Override
-    public ClientOptionsBase setTcpUserTimeout(int tcpUserTimeout) {
+    public MqttClientSessionOptions setTcpUserTimeout(int tcpUserTimeout) {
         super.setTcpUserTimeout(tcpUserTimeout);
         return this;
     }
