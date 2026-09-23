@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.TopicPartition;
@@ -88,7 +89,7 @@ public class TopicsCompanion {
     public Uni<TopicDescription> waitForTopic(String topic) {
         int retries = 10;
         Duration maxBackOff = kafkaApiTimeout.dividedBy(retries);
-        return toUni(() -> adminClient.describeTopics(Collections.singletonList(topic)).allTopicNames())
+        return describeWhenLeadersReady(Collections.singletonList(topic))
                 .onFailure().retry().withBackOff(maxBackOff, maxBackOff).atMost(retries)
                 .onItem().transform(m -> m.get(topic))
                 .onFailure().recoverWithUni(e -> Uni.createFrom().failure(new IllegalStateException(
@@ -116,11 +117,26 @@ public class TopicsCompanion {
     public Uni<Map<String, TopicDescription>> waitForTopics(Collection<String> topics) {
         int retries = 10;
         Duration maxBackOff = kafkaApiTimeout.dividedBy(retries);
-        return toUni(() -> adminClient.describeTopics(topics).allTopicNames())
+        return describeWhenLeadersReady(topics)
                 .onFailure().retry().withBackOff(maxBackOff, maxBackOff).atMost(retries)
                 .onFailure().recoverWithUni(e -> Uni.createFrom().failure(new IllegalStateException(
                         "Max number of attempts reached, topics " + topics + " were not created after 10 attempts",
                         e)));
+    }
+
+    /**
+     * Describes the given topics once the leader of each of their partitions serves requests.
+     * <p>
+     * The broker lists a topic before it takes the leadership of its partitions, and an idempotent producer whose
+     * first batch fails with {@code NOT_LEADER_OR_FOLLOWER} can then retry forever with
+     * {@code OUT_OF_ORDER_SEQUENCE_NUMBER} (KAFKA-14359). Listing the offsets, which only the partition leaders
+     * answer, waits for them.
+     */
+    private Uni<Map<String, TopicDescription>> describeWhenLeadersReady(Collection<String> topics) {
+        return toUni(() -> adminClient.describeTopics(topics).allTopicNames())
+                .call(m -> toUni(() -> adminClient.listOffsets(m.values().stream()
+                        .flatMap(t -> t.partitions().stream().map(p -> new TopicPartition(t.name(), p.partition())))
+                        .collect(Collectors.toMap(tp -> tp, tp -> OffsetSpec.latest()))).all()));
     }
 
     /**
