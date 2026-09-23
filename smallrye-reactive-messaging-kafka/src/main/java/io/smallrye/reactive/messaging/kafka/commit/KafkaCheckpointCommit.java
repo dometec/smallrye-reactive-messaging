@@ -464,8 +464,9 @@ public class KafkaCheckpointCommit extends ContextHolder implements KafkaCommitH
         }
 
         public long millisSinceLastPersistedOffset() {
-            // state never persisted, count the time passed since local state store
-            if (persistedAt.notPersisted() && received.get() > 0) {
+            // state never persisted, count the time passed since local state store,
+            // also when it only holds the state fetched from the store on assignment
+            if (persistedAt.notPersisted() && (received.get() > 0 || hasUnsyncedOffset())) {
                 return System.currentTimeMillis() - createdTimestamp;
             } else if (hasUnsyncedOffset()) {
                 return System.currentTimeMillis() - persistedAt.getPersistedAt();
