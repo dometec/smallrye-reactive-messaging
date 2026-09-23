@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -82,8 +83,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         container = weld.initialize();
         await().until(() -> isRabbitMQConnectorAvailable(container));
 
-        final JsonObject exchange = usage.getExchange(exchangeName);
-        assertThat(exchange).isNotNull();
+        final JsonObject exchange = awaitExchange(exchangeName);
         assertThat(exchange.getString("name")).isEqualTo(exchangeName);
         assertThat(exchange.getString("type")).isEqualTo(exchangeType);
         assertThat(exchange.getBoolean("auto_delete")).isEqualTo(exchangeAutoDelete);
@@ -145,8 +145,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         await().until(() -> isRabbitMQConnectorAvailable(container));
 
         // verify exchange
-        final JsonObject exchange = usage.getExchange(exchangeName);
-        assertThat(exchange).isNotNull();
+        final JsonObject exchange = awaitExchange(exchangeName);
         assertThat(exchange.getString("name")).isEqualTo(exchangeName);
         assertThat(exchange.getString("type")).isEqualTo(exchangeType);
         assertThat(exchange.getBoolean("auto_delete")).isEqualTo(exchangeAutoDelete);
@@ -154,8 +153,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(exchange.getBoolean("internal")).isFalse();
 
         // verify queue
-        final JsonObject queue = usage.getQueue(queueName);
-        assertThat(queue).isNotNull();
+        final JsonObject queue = awaitQueue(queueName);
         assertThat(queue.getString("name")).isEqualTo(queueName);
         assertThat(queue.getBoolean("auto_delete")).isEqualTo(queueAutoDelete);
         assertThat(queue.getBoolean("durable")).isEqualTo(queueDurable);
@@ -172,8 +170,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(queueArguments.getString("x-queue-mode")).isEqualTo(queueMode);
         assertThat(queueArguments.getBoolean("x-single-active-consumer")).isEqualTo(true);
 
-        final JsonArray queueBindings = usage.getBindings(exchangeName, queueName);
-        assertThat(queueBindings.size()).isEqualTo(2);
+        final JsonArray queueBindings = awaitBindings(exchangeName, queueName, 2);
 
         final List<?> bindings = queueBindings.stream()
                 .sorted(Comparator.comparing(x -> ((JsonObject) x).getString("routing_key")))
@@ -407,6 +404,41 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         });
     }
 
+    /**
+     * The connector declares exchanges, queues and bindings asynchronously, and reports itself available
+     * before the management API sees them, so every read below retries until what it looks for shows up.
+     */
+    private JsonObject awaitExchange(String exchangeName) {
+        AtomicReference<JsonObject> exchange = new AtomicReference<>();
+        await().untilAsserted(() -> {
+            JsonObject found = usage.getExchange(exchangeName);
+            assertThat(found).isNotNull();
+            exchange.set(found);
+        });
+        return exchange.get();
+    }
+
+    private JsonObject awaitQueue(String queueName) {
+        AtomicReference<JsonObject> queue = new AtomicReference<>();
+        await().untilAsserted(() -> {
+            JsonObject found = usage.getQueue(queueName);
+            assertThat(found).isNotNull();
+            queue.set(found);
+        });
+        return queue.get();
+    }
+
+    private JsonArray awaitBindings(String exchangeName, String queueName, int expectedSize) {
+        AtomicReference<JsonArray> bindings = new AtomicReference<>();
+        await().untilAsserted(() -> {
+            JsonArray found = usage.getBindings(exchangeName, queueName);
+            assertThat(found).isNotNull();
+            assertThat(found.size()).isEqualTo(expectedSize);
+            bindings.set(found);
+        });
+        return bindings.get();
+    }
+
     private static String getConnectionName(JsonObject connection) {
         String connectionName = connection.getString("connection_name");
         if (connectionName != null) {
@@ -527,8 +559,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         await().until(() -> isRabbitMQConnectorAvailable(container));
 
         // verify exchange
-        final JsonObject exchange = usage.getExchange(exchangeName);
-        assertThat(exchange).isNotNull();
+        final JsonObject exchange = awaitExchange(exchangeName);
         assertThat(exchange.getString("name")).isEqualTo(exchangeName);
         assertThat(exchange.getString("type")).isEqualTo(exchangeType);
         assertThat(exchange.getBoolean("auto_delete")).isEqualTo(exchangeAutoDelete);
@@ -536,8 +567,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(exchange.getBoolean("internal")).isFalse();
 
         // verify dlx
-        final JsonObject dlx = usage.getExchange(dlxName);
-        assertThat(dlx).isNotNull();
+        final JsonObject dlx = awaitExchange(dlxName);
         assertThat(dlx.getString("name")).isEqualTo(dlxName);
         assertThat(dlx.getString("type")).isEqualTo(dlxType);
         assertThat(dlx.getBoolean("auto_delete")).isFalse();
@@ -545,8 +575,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(dlx.getBoolean("internal")).isFalse();
 
         // verify queue
-        final JsonObject queue = usage.getQueue(queueName);
-        assertThat(queue).isNotNull();
+        final JsonObject queue = awaitQueue(queueName);
         assertThat(queue.getString("name")).isEqualTo(queueName);
         assertThat(queue.getBoolean("auto_delete")).isEqualTo(queueAutoDelete);
         assertThat(queue.getBoolean("durable")).isEqualTo(queueDurable);
@@ -559,8 +588,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(queueArguments.getLong("x-message-ttl")).isEqualTo(queueTtl);
 
         // verify dlq
-        final JsonObject dlq = usage.getQueue(dlqName);
-        assertThat(dlq).isNotNull();
+        final JsonObject dlq = awaitQueue(dlqName);
         assertThat(dlq.getString("name")).isEqualTo(dlqName);
         assertThat(dlq.getBoolean("auto_delete")).isFalse();
         assertThat(dlq.getBoolean("durable")).isTrue();
@@ -575,8 +603,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(dlqArguments.getLong("x-message-ttl")).isEqualTo(dlqTtl);
 
         // verify bindings
-        final JsonArray queueBindings = usage.getBindings(exchangeName, queueName);
-        assertThat(queueBindings.size()).isEqualTo(2);
+        final JsonArray queueBindings = awaitBindings(exchangeName, queueName, 2);
 
         final List<?> bindings = queueBindings.stream()
                 .sorted(Comparator.comparing(x -> ((JsonObject) x).getString("routing_key")))
@@ -599,8 +626,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         assertThat(binding2.getString("routing_key")).isEqualTo("urgent");
 
         // verify dlq bindings
-        final JsonArray dlqBindings = usage.getBindings(dlxName, dlqName);
-        assertThat(dlqBindings.size()).isEqualTo(1);
+        final JsonArray dlqBindings = awaitBindings(dlxName, dlqName, 1);
 
         final JsonObject dlqBinding1 = (JsonObject) dlqBindings.getJsonObject(0);
         assertThat(dlqBinding1).isNotNull();
@@ -644,8 +670,7 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         await().until(() -> isRabbitMQConnectorAvailable(container));
 
         // verify queue
-        final JsonObject queue = usage.getQueue(queueName);
-        assertThat(queue).isNotNull();
+        final JsonObject queue = awaitQueue(queueName);
         assertThat(queue.getString("name")).isEqualTo(queueName);
         assertThat(queue.getBoolean("durable")).isEqualTo(queueDurable);
 
