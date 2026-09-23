@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -462,7 +463,7 @@ public class PerPartitionExactlyOnceProcessingTest extends KafkaCompanionTestBas
         PoolExhaustionApp app = runApplication(config, PoolExhaustionApp.class);
 
         // First transaction holds a producer, second should fail with pool exhausted
-        assertThatThrownBy(() -> app.runConcurrentTransactions().await().atMost(Duration.ofSeconds(10)))
+        assertThatThrownBy(() -> app.runConcurrentTransactions().await().atMost(Duration.ofSeconds(30)))
                 .hasMessageContaining("pool");
     }
 
@@ -583,18 +584,22 @@ public class PerPartitionExactlyOnceProcessingTest extends KafkaCompanionTestBas
         KafkaTransactions<Integer> transaction;
 
         Uni<Void> runConcurrentTransactions() {
-            // First transaction holds the only pooled producer with a delay
+            // The transaction that gets the only pooled producer holds it until the other one fails,
+            // however long the producer takes to initialize its transactions
+            CompletableFuture<Void> exhausted = new CompletableFuture<>();
             Uni<Void> tx1 = transaction.withTransaction(emitter -> {
                 emitter.send(1);
-                return Uni.createFrom().voidItem()
-                        .onItem().delayIt().by(Duration.ofSeconds(5));
+                return Uni.createFrom().completionStage(exhausted);
             });
             // Second transaction should fail because pool is exhausted (max-pool-size=1)
             Uni<Void> tx2 = transaction.withTransaction(emitter -> {
                 emitter.send(2);
-                return Uni.createFrom().voidItem();
+                return Uni.createFrom().completionStage(exhausted);
             });
-            return Uni.join().all(tx1, tx2).andCollectFailures().replaceWithVoid();
+            return Uni.join().all(
+                    tx1.onFailure().invoke(() -> exhausted.complete(null)),
+                    tx2.onFailure().invoke(() -> exhausted.complete(null)))
+                    .andCollectFailures().replaceWithVoid();
         }
     }
 
