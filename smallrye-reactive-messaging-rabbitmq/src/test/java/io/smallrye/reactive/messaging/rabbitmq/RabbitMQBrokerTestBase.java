@@ -1,7 +1,12 @@
 package io.smallrye.reactive.messaging.rabbitmq;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.enterprise.inject.Any;
@@ -18,6 +23,8 @@ import io.smallrye.reactive.messaging.providers.connectors.ExecutionHolder;
 import io.smallrye.reactive.messaging.providers.extension.HealthCenter;
 import io.smallrye.reactive.messaging.test.common.config.MapBasedConfig;
 import io.smallrye.reactive.messaging.test.common.config.SmallRyeConfigTestUtil;
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -87,6 +94,28 @@ public class RabbitMQBrokerTestBase {
     public boolean isRabbitMQConnectorAvailable(WeldContainer container) {
         final RabbitMQConnector connector = get(container, RabbitMQConnector.class, Any.Literal.INSTANCE);
         return connector.getLiveness().isOk();
+    }
+
+    /**
+     * The connector declares queues and their bindings asynchronously, and reports itself available and ready
+     * before they exist, while an exchange drops the messages it cannot route. Wait for the exchange to have a
+     * binding for each of the given routing keys, repeated as many times as it is given, before producing.
+     *
+     * @param exchange the name of the exchange
+     * @param routingKeys the routing keys of the expected bindings
+     */
+    public void awaitExchangeBindings(String exchange, String... routingKeys) {
+        await().untilAsserted(() -> {
+            JsonArray bindings = usage.getExchangeBindings(exchange);
+            assertThat(bindings).isNotNull();
+            List<String> bound = new ArrayList<>();
+            bindings.forEach(binding -> bound.add(((JsonObject) binding).getString("routing_key")));
+            for (String routingKey : routingKeys) {
+                assertThat(bound.remove(routingKey))
+                        .as("binding with routing key '%s' of exchange %s in %s", routingKey, exchange, bindings)
+                        .isTrue();
+            }
+        });
     }
 
     public boolean isRabbitMQConnectorReady(SeContainer container) {

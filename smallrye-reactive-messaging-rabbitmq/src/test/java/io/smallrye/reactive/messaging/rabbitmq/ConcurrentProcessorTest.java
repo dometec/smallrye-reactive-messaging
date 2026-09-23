@@ -44,6 +44,7 @@ public class ConcurrentProcessorTest extends WeldTestBase {
     }
 
     private void produceMessages() {
+        awaitExchangeBindings(exchangeName, "foo", "bar", "qux");
         AtomicInteger counter = new AtomicInteger(0);
         usage.produce(exchangeName, null, "foo", 4, counter::getAndIncrement,
                 new AMQP.BasicProperties.Builder().contentType("text/plain").headers(Map.of("key", "foo")).build());

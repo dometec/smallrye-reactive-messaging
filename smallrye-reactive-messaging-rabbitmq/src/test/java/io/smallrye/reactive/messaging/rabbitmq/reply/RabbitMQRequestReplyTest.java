@@ -90,6 +90,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<String> replies = new CopyOnWriteArrayList<>();
         RequestReplyProducer producer = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(i).subscribe().with(replies::add);
         }
@@ -110,6 +111,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducer producer = container.getBeanManager().createInstance()
                 .select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         AtomicReference<Context> replyContext = new AtomicReference<>();
         AtomicReference<String> replyLocalValue = new AtomicReference<>();
@@ -155,6 +157,8 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducer producer = container.getBeanManager()
                 .createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        // x-local-random exchanges ignore the routing keys, the queue is bound with an empty one
+        awaitExchangeBindings(exchangeName, "");
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(i).subscribe().with(replies::add);
         }
@@ -188,6 +192,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducer producer = container.getBeanManager()
                 .createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchangeName, "rpc.*");
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(i).subscribe().with(replies::add);
         }
@@ -224,6 +229,8 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducer producer = container.getBeanManager()
                 .createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        // one binding for each of the two consumers, with the default routing key
+        awaitExchangeBindings(exchange, "#", "#");
         int sent = 5;
         for (int i = 0; i < sent; i++) {
             producer.requestReply().requestMulti(i)
@@ -256,6 +263,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducerWithConverter producer = container.getBeanManager().createInstance()
                 .select(RequestReplyProducerWithConverter.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(i).subscribe().with(replies::add);
@@ -279,6 +287,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<String> replies = new CopyOnWriteArrayList<>();
         RequestReplyProducer app = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         for (int i = 0; i < 10; i++) {
             app.requestReply().request(Message.of(i)).subscribe().with(m -> replies.add(m.getPayload()));
@@ -300,6 +309,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<String> replies = new CopyOnWriteArrayList<>();
         RequestReplyProducer app = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         List<String> expected = new ArrayList<>();
         int sent = 5;
@@ -337,6 +347,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<String> replies = new CopyOnWriteArrayList<>();
         RequestReplyProducer app = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         app.requestReply().requestMulti(0)
                 .select().first(5)
@@ -367,6 +378,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         RequestReplyProducerSecond app = container.getBeanManager().createInstance().select(RequestReplyProducerSecond.class)
                 .get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         for (int i = 0; i < 20; i++) {
             RabbitMQRequestReply<Integer, String> requestReply = (i % 2 == 0) ? app.requestReply() : app.requestReply2();
@@ -398,6 +410,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<String> replies = new CopyOnWriteArrayList<>();
         RequestReplyProducer producer = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(Message.of(i)).subscribe().with(m -> replies.add(m.getPayload()));
         }
@@ -421,6 +434,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
         List<Throwable> errors = new CopyOnWriteArrayList<>();
         RequestReplyProducer producer = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         for (int i = 0; i < 10; i++) {
             producer.requestReply().request(i)
@@ -450,6 +464,7 @@ class RabbitMQRequestReplyTest extends RabbitMQBrokerTestBase {
 
         RequestReplyProducer producer = container.getBeanManager().createInstance().select(RequestReplyProducer.class).get();
         await().until(() -> isRabbitMQConnectorAvailable(container));
+        awaitExchangeBindings(exchange, requestAddress);
 
         producer.requestReply().request(1)
                 .subscribe().withSubscriber(UniAssertSubscriber.create())

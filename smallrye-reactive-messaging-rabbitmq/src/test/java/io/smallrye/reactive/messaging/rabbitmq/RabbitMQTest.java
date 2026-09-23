@@ -1061,6 +1061,8 @@ class RabbitMQTest extends RabbitMQBrokerTestBase {
         List<Integer> dlqList = bean.getDlqResults();
         assertThat(dlqList).isEmpty();
 
+        // queue.routing-keys is not an attribute of the connector, the queue is bound with the default '#'
+        awaitExchangeBindings(exchangeName, "#");
         AtomicInteger counter = new AtomicInteger();
         usage.produceTenIntegers(exchangeName, queueName, routingKey, counter::getAndIncrement);
 

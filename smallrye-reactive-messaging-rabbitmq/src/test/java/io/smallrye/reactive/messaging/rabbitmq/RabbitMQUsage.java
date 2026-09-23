@@ -278,6 +278,29 @@ public class RabbitMQUsage {
     }
 
     /**
+     * Returns the RabbitMQ JSON representation of the bindings in which the
+     * named exchange is the source.
+     *
+     * @param exchangeName the name of the exchange
+     * @return a {@link JsonArray} of binding descriptions
+     * @throws IOException if an error occurs
+     */
+    public JsonArray getExchangeBindings(final String exchangeName) throws IOException {
+        final URL url = new URL(String.format("http://%s:%d/api/exchanges/%%2F/%s/bindings/source",
+                options.getHost(), managementPort, exchangeName));
+        final HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestProperty("Authorization", "Basic " + getBasicAuth());
+        conn.connect();
+
+        if (conn.getResponseCode() == 200) {
+            final String jsonString = getResponseString(conn);
+            return new JsonArray(jsonString);
+        } else {
+            return null;
+        }
+    }
+
+    /**
      * Returns the list of active connections.
      *
      * @return a {@link JsonArray} of connection descriptions
